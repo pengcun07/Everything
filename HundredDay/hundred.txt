@@ -1,0 +1,35 @@
+Auth 2.0
+
+http://www.rfcreader.com/#rfc6749
+
+OAuth 的核心就是向第三方应用颁发令牌。
+
+四种授权的方式
+	授权码（authorization-code）
+	授权码（authorization code）方式，指的是第三方应用先申请一个授权码，然后再用该码获取令牌。
+		1. 请求获取授权码（授权网站用户点击授权）
+		2. 回调获取授权码code
+		3. 根据授权码code 请求获取token
+		3. 回调获取令牌token
+		https://b.com/oauth/authorize?response_type=code&client_id=CLIENT_ID&redirect_uri=CALLBACK_URL&scope=read
+		https://a.com/callback?code=AUTHORIZATION_CODE
+		https://b.com/oauth/token?client_id=CLIENT_ID&client_secret=CLIENT_SECRET&grant_type=authorization_code&code=AUTHORIZATION_CODE&redirect_uri=CALLBACK_URL
+		
+	隐藏式（implicit）
+	RFC 6749 就规定了第二种方式，允许直接向前端颁发令牌。这种方式没有授权码这个中间步骤，所以称为（授权码）"隐藏式"（implicit）
+		1. 直接获取令牌token的链接 （授权网站用户点击授权）
+		2. 回调获取令牌token
+		https://b.com/oauth/authorize?response_type=token&client_id=CLIENT_ID&redirect_uri=CALLBACK_URL&scope=read
+	密码式（password）
+	如果你高度信任某个应用，RFC 6749 也允许用户把用户名和密码，直接告诉该应用。该应用就使用你的密码，申请令牌，这种方式称为"密码式"（password）。
+		1. 直接使用用户名密码获取token
+		2. 网站验证身份通过后，直接给出令牌
+		https://oauth.b.com/token?grant_type=password&username=USERNAME&password=PASSWORD&client_id=CLIENT_ID
+	客户端凭证（client credentials）
+	最后一种方式是凭证式（client credentials），适用于没有前端的命令行应用，即在命令行下请求令牌。
+		1. 应用在命令行向网站发出请求。
+		2. 网站验证通过以后，直接返回令牌。
+		https://oauth.b.com/token?grant_type=client_credentials&client_id=CLIENT_ID&client_secret=CLIENT_SECRET
+更新令牌
+	令牌的有效期到了，如果让用户重新走一遍上面的流程，再申请一个新的令牌，很可能体验不好，而且也没有必要。OAuth 2.0 允许用户自动更新令牌。
+	https://b.com/oauth/token?grant_type=refresh_token&client_id=CLIENT_ID&client_secret=CLIENT_SECRET&refresh_token=REFRESH_TOKEN
