@@ -1,0 +1,108 @@
+https://mp.weixin.qq.com/s/UolWzSWEbtKFBVnqKWYKSQ
+1. 排查CPU方面的问题
+	cpu异常往往还是比较好定位的。原因包括业务逻辑问题(死循环)、频繁gc以及上下文切换过多。
+	而最常见的往往是业务逻辑(或者框架逻辑)导致的，可以使用jstack来分析对应的堆栈情况。
+	
+	思路：使用jstack分析cpu问题
+	第一步：  top -c             找到cpu负载异常的程序的PID
+	第二步：  top -Hp PID        找到线程PID
+	第三步：  printf '%x\n' pid  线程ID转换成十六进制nid
+	第四步：  jstack pid |grep 'nid' -C5 –color	 在jstack中找到相应的堆栈信息
+	
+	分析jstack：  cat jstack.log | grep "java.lang.Thread.State" | sort -nr | uniq -c
+	
+	频繁gc：      jstat -gc pid 1000
+	上下文切换：  vmstat 1    cs(context switch)一列则代表了上下文切换的次数。
+	              对特定的pid进行监控那么可以使用 pidstat -w pid命令
+	
+2.磁盘
+    磁盘空间方面：我们直接使用df -hl来查看文件系统状态
+	性能上的问题：我们可以通过iostat -d -k -x来进行分析
+	
+	用iotop命令来进行定位文件读写的来源
+	进程具体的读写情况cat /proc/pid/io
+	lsof命令来确定具体的文件读写情况lsof -p pid
+
+3.内存
+    主要包括OOM、GC问题和堆外内存。一般来讲，我们会先用free命令先来检查一发内存的各种情况。
+	
+	堆内内存：内存问题大多还都是堆内内存问题。表象上主要分为OOM和StackOverflow。
+	JMV中的内存不足，OOM大致可以分为以下几种：
+    Exception in thread "main" java.lang.OutOfMemoryError: unable to create new native thread
+	    没有足够的内存空间给线程分配java栈
+        通过修改/etc/security/limits.confnofile和nproc来增大os对线程的限制
+		
+    Exception in thread "main" java.lang.OutOfMemoryError: Java heap space
+        堆的内存占用已经达到-Xmx设置的最大值
+		
+	Caused by: java.lang.OutOfMemoryError: Meta space
+	    元数据区的内存占用已经达到XX:MaxMetaspaceSize设置的最大值
+	
+	Stack Overflow
+	Exception in thread "main" java.lang.StackOverflowError
+	    表示线程栈需要的内存大于Xss值，同样也是先进行排查，参数方面通过Xss来调整，但调整的太大可能又会引起OOM。
+	
+	gc问题和线程
+	总体线程，通过pstreee -p pid |wc -l。 或者直接通过查看/proc/pid/task的数量即为线程数量。
+	
+	堆外内存
+	OutOfMemoryError: Direct buffer memory。
+	    一般我们先通过pmap来查看下进程占用的内存情况pmap -x pid | sort -rn -k3 | head -30
+	
+4.GC问题
+    youngGC过频繁
+        youngGC频繁一般是短周期小对象较多，先考虑是不是Eden区/新生代设置的太小了，
+		看能否通过调整-Xmn、-XX:SurvivorRatio等参数设置来解决问题。
+		如果参数正常，但是young gc频率还是太高，就需要使用Jmap和MAT对dump文件进行进一步排查了。
+	youngGC耗时过长
+	    以G1日志为例，可以关注Root Scanning、Object Copy、Ref Proc等阶段。Ref Proc耗时长，就要注意引用相关的对象。
+	触发fullGC
+	    fullGC的原因可能包括以下这些，以及参数调整方面的一些思路：
+		1.并发阶段失败：在并发标记阶段，MixGC之前老年代就被填满了，那么这时候G1就会放弃标记周期。
+		    这种情况，可能就需要增加堆大小，或者调整并发标记线程数-XX:ConcGCThreads。
+		2。晋升失败：在GC的时候没有足够的内存供存活/晋升对象使用，所以触发了Full GC。
+		    这时候可以通过-XX:G1ReservePercent来增加预留内存百分比，
+			减少-XX:InitiatingHeapOccupancyPercent来提前启动标记，-XX:ConcGCThreads来增加标记线程数也是可以的。
+		3.大对象分配失败：大对象找不到合适的region空间进行分配，就会进行fullGC，这种情况下可以增大内存或者增大-XX:G1HeapRegionSize。
+		4.程序主动执行System.gc()：不要随便写就对了。
+	另外，我们可以在启动参数中配置-XX:HeapDumpPath=/xxx/dump.hprof来dump fullGC相关的文件，并通过jinfo来进行gc前后的dump
+	    jinfo -flag +HeapDumpBeforeFullGC pid 
+		jinfo -flag +HeapDumpAfterFullGC pid
+	这样得到2份dump文件，对比后主要关注被gc掉的问题对象来定位问题。
+5.网络
+    超时
+	超时大体可以分为连接超时和读写超时，某些使用连接池的客户端框架还会存在获取连接超时和空闲连接清理超时。
+    	读写超时。readTimeout/writeTimeout，有些框架叫做so_timeout或者socketTimeout，均指的是数据读写超时。
+		    注意这边的超时大部分是指逻辑上的超时。soa的超时指的也是读超时。读写超时一般都只针对客户端设置。
+        连接超时。connectionTimeout，客户端通常指与服务端建立连接的最大时间。
+		    服务端这边connectionTimeout就有些五花八门了，jetty中表示空闲连接清理时间，tomcat则表示连接维持的最大时间。
+		其他。包括连接获取超时connectionAcquireTimeout和空闲连接清理超时idleConnectionTimeout。多用于使用连接池或队列的客户端或服务端框架。
+	TCP队列溢出
+	    tcp队列溢出是个相对底层的错误，它可能会造成超时、rst等更表层的错误。
+		
+	    那么在实际开发中，我们怎么能快速定位到tcp队列溢出呢？
+		    1. netstat命令，执行netstat -s | egrep "listen|LISTEN"
+	        2. ss命令，执行ss -lnt
+	RST异常
+	    RST包表示连接重置，用于关闭一些无用的连接，通常表示异常关闭，区别于四次挥手。
+		在实际开发中，我们往往会看到connection reset / connection reset by peer错误，这种情况就是RST包导致的。
+	端口不存在
+	    如果像不存在的端口发出建立连接SYN请求，那么服务端发现自己并没有这个端口则会直接返回一个RST报文，用于中断连接。
+	主动代替FIN终止连接
+        客户端或服务端有一边发生了异常，该方向对端发送RST以告知关闭连接
+		接收到的TCP报文不在已知的TCP连接内
+		一方长期未收到另一方的确认报文，在一定时间或重传次数后发出RST报文
+    TIME_WAIT和CLOSE_WAIT
+	    TIME_WAIT和CLOSE_WAIT是啥意思相信大家都知道。
+		在线上时，我们可以直接用命令netstat -n | awk '/^tcp/ {++S[$NF]} END {for(a in S) print a, S[a]}'来查看time-wait和close_wait的数量
+		用ss命令会更快ss -ant | awk '{++S[$1]} END {for(a in S) print a, S[a]}'    
+		time_wait的存在一是为了丢失的数据包被后面连接复用，二是为了在2MSL的时间范围内正常关闭连接。它的存在其实会大大减少RST包的出现。
+		close_wait往往都是因为应用程序写的有问题，没有在ACK后再次发起FIN报文。close_wait出现的概率甚至比time_wait要更高，后果也更严重。
+		往往是由于某个地方阻塞住了，没有正常关闭连接，从而渐渐地消耗完所有的线程。
+		
+		
+	
+	
+	
+	
+	
