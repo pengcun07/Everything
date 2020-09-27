@@ -1,0 +1,112 @@
+Linux top命令
+
+Linux top命令用于实时显示 process 的动态。
+
+语法
+	top [-] [d delay] [q] [c] [S] [s] [i] [n] [b]
+
+参数说明：
+
+	d : 改变显示的更新速度，或是在交谈式指令列( interactive command)按 s
+	q : 没有任何延迟的显示速度，如果使用者是有 superuser 的权限，则 top 将会以最高的优先序执行
+	c : 切换显示模式，共有两种模式，一是只显示执行档的名称，
+		另一种是显示完整的路径与名称S : 累积模式，会将己完成或消失的子行程 ( dead child process ) 的 CPU time 累积起来
+	s : 安全模式，将交谈式指令取消, 避免潜在的危机
+	i : 不显示任何闲置 (idle) 或无用 (zombie) 的行程
+	n : 更新的次数，完成后将会退出 top
+	b : 批次档模式，搭配 "n" 参数一起使用，可以用来将 top 的结果输出到档案内
+
+在该命令中常用快捷键
+	h　　　　显示快捷键帮助
+	k　　　　终止一个进程
+	i　　　　 开/关忽略闲置和僵死进程
+	q　　　　退出程序
+	r　　　　 重新安排一个进程的优先级别
+	S　　　 切换到累计模式
+	s　　　　更改刷新间隔时间，单位秒
+	f,F　　 从当前显示中添加或者删除项目
+	o,O　　 改变显示项目的顺序
+	l　　　　 切换显示平均负载和启动时间信息
+	m　　　 切换显示内存信息
+	t　　　　 切换显示进程和CPU状态信息
+	c　　　　切换显示命令名称和完整命令行
+	M　　　 根据内存使用大小排序
+	P　　　　根据CPU使用率进行排序 （默认排序）
+	T　　　　根据时间/累计时间进行排序
+	w　　　　将当前设置写入~/.toprc文件中
+	1　　　　展开多核cpu显示
+	
+实例
+	显示进程信息
+	# top
+	
+	显示完整命令
+	# top -c
+	以批处理模式显示程序信息
+	# top -b
+	
+	以累积模式显示程序信息
+	# top -S
+	
+	设置信息更新次数
+	top -n 2
+
+	//表示更新两次后终止更新显示
+	设置信息更新时间
+	# top -d 3
+
+	//表示更新周期为3秒
+	显示指定的进程信息
+	# top -p 139
+
+	//显示进程号为139的进程信息，CPU、内存占用率等
+	显示更新十次后退出
+	top -n 10
+	
+	使用者将不能利用交谈式指令来对行程下命令
+	top -s
+
+说明
+	top - 18:17:22 up 8:52, 1 user, load average: 0.05, 0.04, 0.05
+	Tasks: 99 total, 2 running, 97 sleeping, 0 stopped, 0 zombie
+	%Cpu(s): 0.0 us, 0.1 sy, 0.0 ni, 99.9 id, 0.0 wa, 0.0 hi, 0.0 si, 0.0 st
+	KiB Mem : 739932 total, 353944 free, 125284 used, 260704 buff/cache
+	KiB Swap: 1044476 total, 1044476 free, 0 used. 459304 avail Mem
+
+	PID USER PR NI VIRT RES SHR S %CPU %MEM TIME+ COMMAND
+	47 root 20 0 0 0 0 S 0.1 0.0 0:36.55 kworker/0:1
+	643 root 20 0 21668 1284 972 S 0.1 0.2 0:18.13 irqbalance
+	1668 root 20 0 0 0 0 S 0.1 0.0 0:01.08 kworker/1:1
+	1 root 20 0 127968 6480 4096 S 0.0 0.9 0:01.93 systemd
+	2 root 20 0 0 0 0 S 0.0 0.0 0:00.02 kthreadd
+	3 root 20 0 0 0 0 S 0.0 0.0 0:00.23 ksoftirqd/0
+	5 root 0 -20 0 0 0 S 0.0 0.0 0:00.00 kworker/0:0H
+	7 root rt 0 0 0 0 S 0.0 0.0 0:00.02 migration/0
+	8 root 20 0 0 0 0 S 0.0 0.0 0:00.00 rcu_bh
+	9 root 20 0 0 0 0 R 0.0 0.0 0:01.95 rcu_sched
+	10 root 0 -20 0 0 0 S 0.0 0.0 0:00.00 lru-add-drain
+	top - 　　　　系统当前时间
+	up 　　　　　 系统已开机多长时间
+	user 　　　　 当前用户数
+	load average cpu平均负载，三个数值分别为，1分钟，5分钟，15分钟
+	Tasks 　　    系统当前进程数，total：总进程数，running：正在运行的进程数，sleeping：睡眠的进程数，stopped：停止的进程数，zombie：僵尸进程数
+	%Cpu(s)       cpu使用率，us：用户使用cpu百分百，sy：系统内核使用cpu百分百，id：剩余的cpu百分百
+	Mem 　　　    内存使用信息，total：总内存大小，free：空闲的内存，used：已使用的内存，buff/cache：缓存的内存大小
+	Swap 　　     虚拟内存信息
+	PID　　　　   进程id
+	USER　　　　  进程所有者
+	PR　　　　　　优先级
+	NI　　　　　　nice值，负值表示高优先级，正值表示低优先级
+	VIRT 　　　　 进程使用的虚拟内存总量
+	RES 　　　　　进程使用的物理内存大小
+	SHR 　　　　　共享内存大小
+	S 　　　　　　进程状态，D：不可中断的睡眠状态，R：运行，S：睡眠，T：跟踪/停止，Z：僵尸进程
+	%CPU 　　　　 进程使用的CPU占用百分比
+	%MEM 　　　　 进程使用的物理内存百分比
+	TIME+ 　　　　进程使用的CPU时间总计
+	COMMAND　　   命令名
+
+
+
+
+
