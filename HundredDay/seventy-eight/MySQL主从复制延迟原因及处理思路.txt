@@ -1,0 +1,142 @@
+http://blog.itpub.net/29773961/viewspace-2154936/
+
+在异步或半同步的复制结构中，从库出现延迟是一件十分正常的事。
+虽出现延迟正常，但是否需要关注，则一般是由业务来评估。
+如：从库上有需要较高一致性的读业务，并且要求延迟小于某个值，那么则需要关注。
+
+首先，简单概述一下复制逻辑：
+	1、主库将对数据库实例的变更记录到binlog中。  
+	2、主库会有binlog dump线程实时监测binlog的变更并将这些新的events推给从库（Master has sent all binlog to slave; waiting for more updates）
+	3、从库的IO Thread接收这些events，并将其记录入relaylog。
+	4、从库的SQL Thread读取relaylog的events，并将这些events应用（或称为重放）到从库实例。
+
+	上述为默认的异步复制逻辑，半同步复制又有些许不同，此处不再赘述。
+
+	此外，判断从库有延迟是十分简单的一件事：
+	在从库上通过SHOW SLAVE STATUS
+	检查Seconds_Behind_Master值即可。
+
+产生延迟的原因及处理思路
+	〇 主库DML请求频繁（tps较大）
+		即主库写请求较多，有大量insert、delete、update并发操作，短时间产生了大量的binlog。
+		【原因分析】
+		主库并发写入数据，而从库SQL Thread为单线程应用日志，很容易造成relaylog堆积，产生延迟。
+
+		【解决思路】
+		做sharding，通过scale out打散写请求。或考虑升级到MySQL 5.7+，开启基于逻辑时钟的并行复制。
+
+	〇 主库执行大事务
+		比如大量导入数据，INSERT INTO $tb1 SELECT * FROM $tb2、LOAD DATA INFILE等
+		比如UPDATE、DELETE了全表等
+		Exec_Master_Log_Pos一直未变，Slave_SQL_Running_State为Reading event from the relay log
+		分析主库binlog，看主库当前执行的事务也可知晓。
+		【原因分析】
+		假如主库花费200s更新了一张大表，在主从库配置相近的情况下，从库也需要花几乎同样的时间更新这张大表，此时从库延迟开始堆积，后续的events无法更新。
+
+		【解决思路】
+		拆分大事务，及时提交。
+
+	〇 主库对大表执行DDL语句
+		现象和主库执行大事务相近。
+		检查Exec_Master_Log_Pos一直未动，也有可能是在执行DDL。
+		分析主库binlog，看主库当前执行的事务也可知晓。
+		【原因分析】
+			1、DDL未开始，被阻塞，SHOW SLAVE STATUS检查到Slave_SQL_Running_State为waiting for table metadata lock，且Exec_Master_Log_Pos不变。
+			2、DDL正在执行，SQL Thread单线程应用导致延迟增加。Slave_SQL_Running_State为altering table，Exec_Master_Log_Pos不变
+
+		【解决思路】
+		通过processlist或information_schema.innodb_trx来找到阻塞DDL语句的查询，干掉该查询，让DDL正常在从库执行。
+		DDL本身造成的延迟难以避免，建议考虑：
+			① 业务低峰期执行 
+			② set sql_log_bin=0后，分别在主从库上手动执行DDL（此操作对于某些DDL操作会造成数据不一致，请务必严格测试）
+
+	〇 主库与从库配置不一致：
+		【原因分析】
+		硬件上：主库实例服务器使用SSD，而从库实例服务器使用普通SAS盘、cpu主频不一致等
+		配置上：如RAID卡写策略不一致，OS内核参数设置不一致，MySQL落盘策略不一致等
+
+		【解决思路】
+		尽量统一DB机器的配置（包括硬件及选项参数）
+		甚至对于某些OLAP业务，从库实例硬件配置高于主库等
+
+	〇 表缺乏主键或唯一索引
+		binlog_format=row的情况下，如果表缺乏主键或唯一索引，在UPDATE、DELETE的时候可能会造成从库延迟骤增。
+		此时Slave_SQL_Running_State为Reading event from the relay log。
+		并且SHOW OPEN TABLES WHERE in_use=1的表一直存在。
+		Exec_Master_Log_Pos不变。
+		mysqld进程的cpu几近100%（无读业务时），io压力不大
+		【原因分析】
+		做个极端情况下的假设，主库更新一张500w表中的20w行数据，该update语句需要全表扫描
+		而row格式下，记录到binlog的为20w次update操作，此时SQL Thread重放将特别慢，每一次update可能需要进行一次全表扫描
+
+		【解决思路】
+		检查表结构，保证每个表都有显式自增主键，并建立合适索引。
+
+	〇 从库自身压力过大
+		【原因分析】
+		从库执行大量select请求，或业务大部分select请求被路由到从库实例上，甚至大量OLAP业务，或者从库正在备份等。
+		此时可能造成cpu负载过高，io利用率过高等，导致SQL Thread应用过慢。
+
+		【解决思路】
+		建立更多从库，打散读请求，降低现有从库实例的压力。
+
+	〇 MyISAM存储引擎
+		此时从库Slave_SQL_Running_State为Waiting for table level lock
+		【原因分析】
+		MyISAM只支持表级锁，并且读写不可并发操作。
+		主库在设置@@concurrent_insert对应值的情况下，能并发在select时执行insert，但从库SQL Thread重放时并不可并发，有兴趣可以再去看看myisam这块的实现。
+
+		【解决思路】
+		当然是选择原谅它了，既然选择了MyISAM，那么也应该要有心理准备。（还存在其他场景，也不推荐MyISAM在复制结构中使用）
+		改成InnoDB吧。
+
+总结
+	通过SHOW SLAVE STATUS与SHOW PROCESSLIST查看现在从库的情况。（顺便也可排除在从库备份时这种原因）
+	若Exec_Master_Log_Pos不变，考虑大事务、DDL、无主键，检查主库对应的binlog及position即可。
+	若Exec_Master_Log_Pos变化，延迟逐步增加，考虑从库机器负载，如io、cpu等，并考虑主库写操作与从库自身压力是否过大。
+
+	如果上述原因都没有，那么请教请教DBA大佬们吧。
+
+	当然，Seconds_Behind_Master也不一定准确，存在在少部分场景下，虽Seconds_Behind_Master为0，但主从数据不一致的情况。
+	这将是另一篇博文了。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
