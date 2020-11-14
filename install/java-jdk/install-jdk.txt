@@ -1,0 +1,22 @@
+一.去Oracle官网下载所需JDK包
+
+二.安装解压
+	1.创建java文件夹
+		mkdir /usr/local/java
+		 cd /usr/local/java   
+	 
+	2.下载解压
+		wget https://download.oracle.com/otn-pub/java/jdk/8u201-b09/42970487e3af4f5aa5bca3f542482c60/jdk-8u201-linux-x64.tar.gz
+		tar -zxvf jdk-8u201-linux-x64.tar.gz
+	
+	3.配置一下环境变量。解压完之后，Java目录中会出现一个jdk1.8.0_201的目录，做如下操作：	
+		# vi /etc/profile 
+		#输入如下内容
+		JAVA_HOME=/usr/local/java/jdk1.8.0_201 #视具体情况而定       
+		CLASSPATH=$JAVA_HOME/lib/
+		PATH=$PATH:$JAVA_HOME/bin
+		export PATH JAVA_HOME CLASSPATH
+		#保存推出并重启文件生效
+		# source /etc/profile
+	4.验证
+		java -version
